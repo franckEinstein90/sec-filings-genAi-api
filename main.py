@@ -1,9 +1,30 @@
 import os
 from flask import Flask, jsonify
-from src.routes import documents_bp
-from src.routes import portfolio_bp
+from flask_cors import CORS
+from flask_talisman import Talisman
+from flask_wtf import CSRFProtect
+from flask_login import LoginManager
+from flask_jwt_extended import JWTManager
+from src.routes import documents_bp, portfolio_bp
 
 app = Flask(__name__)
+
+# Secure HTTP headers
+Talisman(app)
+
+# Enable CORS
+CORS(app)
+
+# CSRF Protection
+csrf = CSRFProtect(app)
+
+# Session and Login Management
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'  # You can change this to your login endpoint
+
+# JWT Authentication
+jwt = JWTManager(app)
+
 app.register_blueprint(documents_bp, url_prefix="/api/v1/documents")
 app.register_blueprint(portfolio_bp, url_prefix="/api/v1/portfolio")
 
