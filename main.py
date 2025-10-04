@@ -1,15 +1,11 @@
 import os
 from flask import Flask, jsonify
-from document_library_database import ensure_document_library_db
-from routes.upload_filings.process_upload import upload_cba_bp
-from routes.query_collective_bargaining_agreement.query_collective_bargaining_agreement import query_cba_bp
-from routes.collections.post_collections import collection_bp
-
+from src.routes import documents_bp
+from src.routes import portfolio_bp
 
 app = Flask(__name__)
-app.register_blueprint(upload_cba_bp)
-app.register_blueprint(query_cba_bp)
-app.register_blueprint(collection_bp)
+app.register_blueprint(documents_bp, url_prefix="/api/v1/documents")
+app.register_blueprint(portfolio_bp, url_prefix="/api/v1/portfolio")
 
 @app.route('/health')
 def health():

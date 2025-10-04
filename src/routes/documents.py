@@ -1,18 +1,24 @@
 from flask import Blueprint, request, jsonify
 from document_library_database import DocumentMetadata, DocumentLibraryManager
 from union_steward_mode import steward_rag_query
-from .vectorize_file import vectorize_file
+from src.documents_utils import vectorize_file
 
 import os
 import json
 
-upload_cba_bp = Blueprint('documents', __name__)
-@upload_cba_bp.route('/documents/upload', methods=['POST'])
+documents_bp = Blueprint('documents', __name__)
+@documents_bp.route('', methods=['POST'])
 def upload_document():
     results={
         "chunks": 0,
         "processing_steps": []
     }  
+
+    try:
+        form_data = request.form.to_dict()
+        doc_form = DocumentMetadata(**form_data)
+    except Exception as e:
+        return jsonify({'error': f'Invalid metadata: {str(e)}'}), 400
     doc_metadata = DocumentMetadata.from_flask_request(request)
     file = request.files.get('file')
     
@@ -46,7 +52,7 @@ def upload_document():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@upload_cba_bp.route('/documents', methods=['GET'])
+@documents_bp.route('/documents', methods=['GET'])
 def list_documents():
 
     try:
@@ -65,7 +71,7 @@ def list_documents():
         print(f"Error fetching documents: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
     
-@upload_cba_bp.route('/documents/<int:document_id>', methods=['DELETE'])
+@documents_bp.route('/documents/<int:document_id>', methods=['DELETE'])
 def delete_document(document_id):
     try:
         DocumentLibraryManager.delete_document(document_id)
