@@ -1,16 +1,95 @@
-# 📄 SEC Filings GenAI API
+# SEC Filings GenAI API
 
-Flask back-end API for ingesting and vectorizing SEC filings (10-K, 10-Q, 8-K, etc.), storing embeddings in a vector database, and exposing endpoints for retrieval-augmented generation (RAG) queries on financial documents.  
+Flask API that pulls SEC filings from EDGAR, chunks them, stores embeddings in **Postgres + pgvector**, and answers questions with retrieval-augmented generation.
 
-This project is the **back-end** of the SEC Filings GenAI solution. The companion front-end lives in [sec-filings-genAi-app](https://github.com/YOUR_USERNAME/sec-filings-genAi-app).
+There is no separate database install required for local development: `pgserver` ships a Postgres 16 binary (with the `vector` extension) and this app starts it from Python. Point `DATABASE_URL` at any Postgres that has pgvector when you want a durable server instead.
 
----
+The companion UI is [sec-filings-genAi-app](https://github.com/franckEinstein90/sec-filings-genAi-app).
 
-## ✨ Features
+## What it does
 
-- 📥 **Ingest SEC Filings** (e.g., 10-K, 10-Q, 8-K) directly from EDGAR
-- 🔍 **Vectorize and index filings** using SentenceTransformers + FAISS
-- 🤖 **Semantic search endpoints** to query filings for financial and risk information
-- 🧩 Modular design for swapping out vector store or embedding model
-- 🧪 Basic test suite and GitHub Actions CI
+- Resolve issuers by ticker via EDGAR (`company_tickers.json` + submissions)
+- Ingest 10-K / 10-Q / 8-K documents (or upload HTML/PDF/text)
+- Split on Item headings where possible, then recursively chunk
+- Embed with OpenAI (`text-embedding-3-small` by default) and store in `filing_chunks.embedding`
+- Query with cosine similarity over pgvector and cite ticker, form, date, and section
+- Track a watchlist/portfolio of holdings
 
+## Quick start (embedded Postgres)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# set OPENAI_API_KEY and a SEC_USER_AGENT that includes your email
+
+python -m sec_filings.db.bootstrap   # starts embedded Postgres, enables pgvector, runs Alembic
+python main.py                       # http://localhost:5000/health
+```
+
+Data directory defaults to `.pgdata/` (gitignored). Override with `PGDATA_DIR`.
+
+## Optional: Docker Postgres
+
+```bash
+docker compose up -d
+export DATABASE_URL=postgresql+psycopg://sec:sec@localhost:5432/sec_filings
+python -m sec_filings.db.bootstrap
+```
+
+## Schema and migrations
+
+SQLAlchemy models live in `sec_filings/db/models.py`. Alembic versions live in `alembic/versions/`.
+
+```bash
+python -m sec_filings.db.bootstrap
+alembic revision -m "add_something" --autogenerate
+alembic upgrade head
+```
+
+The initial migration:
+
+1. `CREATE EXTENSION vector`
+2. `companies`, `filings`, `filing_chunks`, `portfolios`, `holdings`
+3. HNSW index on `filing_chunks.embedding` (`vector_cosine_ops`)
+
+## HTTP API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Process is up |
+| GET | `/api/v1/ready` | Postgres + pgvector are up |
+| GET/POST | `/api/v1/companies` | List or resolve a ticker from EDGAR |
+| GET | `/api/v1/companies/<cik-or-ticker>` | Company plus ingested filings |
+| POST | `/api/v1/filings/ingest` | `{ "ticker": "AAPL", "form_types": ["10-K"], "limit": 1 }` |
+| POST | `/api/v1/filings/upload` | multipart `file` + `ticker` (+ optional `form_type`) |
+| GET | `/api/v1/filings` | Filter with `ticker`, `cik`, `form_type` |
+| DELETE | `/api/v1/filings/<id>` | Drop a filing and its chunks |
+| POST | `/api/v1/query` | `{ "prompt": "...", "ticker": "AAPL" }` |
+| GET | `/api/v1/portfolio` | Default watchlist |
+| POST | `/api/v1/portfolios` | Create a named portfolio |
+| POST | `/api/v1/portfolios/<id>/holdings` | `{ "ticker": "AAPL", "shares": 10 }` |
+
+EDGAR requires a descriptive `User-Agent` with contact info. Set `SEC_USER_AGENT`.
+
+## Tests
+
+```bash
+EMBEDDING_PROVIDER=hash LLM_PROVIDER=mock pytest -q
+```
+
+Tests boot embedded Postgres, apply migrations, ingest a mocked 10-K, and assert pgvector nearest-neighbor search.
+
+## Layout
+
+```
+sec_filings/
+  db/           models, embedded Postgres, Alembic bootstrap
+  edgar/        EDGAR client and HTML/PDF text extraction
+  embeddings/   OpenAI + deterministic hash embedder (tests)
+  rag/          chunking, similarity query, LLM answer
+  routes/       Flask blueprints
+  services/     ingest pipeline
+alembic/versions/
+```
