@@ -8,6 +8,10 @@ import os
 from sec_filings.config import OPENAI_CHAT_MODEL
 
 
+class LLMError(RuntimeError):
+    """Stable application-level error for LLM provider failures."""
+
+
 class LLM(ABC):
     @abstractmethod
     def complete(self, prompt: str, system_prompt: str) -> dict[str, Any]:
@@ -33,13 +37,17 @@ class OpenAILLM(LLM):
         self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     def complete(self, prompt: str, system_prompt: str) -> dict[str, Any]:
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-        )
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        except Exception as exc:
+            raise LLMError("LLM provider request failed") from exc
+
         usage = None
         if response.usage:
             usage = {
@@ -63,7 +71,7 @@ def get_llm() -> LLM:
     if provider == "mock":
         return MockLLM()
     if not api_key:
-        raise RuntimeError(
+        raise LLMError(
             "OPENAI_API_KEY is not set. Provide a key or set LLM_PROVIDER=mock."
         )
     return OpenAILLM()

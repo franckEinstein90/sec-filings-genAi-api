@@ -11,7 +11,7 @@ from sec_filings.config import DEFAULT_FORM_TYPES, INGEST_DEFAULT_LIMIT
 from sec_filings.db.models import Company, Filing, FilingChunk
 from sec_filings.db.session import get_session
 from sec_filings.edgar.client import CompanyRef, EdgarClient, EdgarError, FilingRef
-from sec_filings.edgar.extract import extract_text
+from sec_filings.edgar.extract import FilingExtractionError, extract_text
 from sec_filings.embeddings import get_embedder
 from sec_filings.rag.chunking import chunk_filing_text
 
@@ -148,6 +148,31 @@ def ingest_upload(
     filing_date: date | None = None,
 ) -> dict:
     company = upsert_company_from_ticker(ticker)
+    content_hash = hashlib.sha256(payload).hexdigest()
+
+    session = get_session()
+    try:
+        existing = (
+            session.query(Filing)
+            .filter_by(
+                company_id=company.id,
+                source="upload",
+                content_hash=content_hash,
+                processing_status="ready",
+            )
+            .order_by(Filing.id.asc())
+            .first()
+        )
+        if existing is not None:
+            return {
+                "skipped": True,
+                "reason": "duplicate_content",
+                "filing": existing.to_dict(),
+                "company": company.to_dict(),
+            }
+    finally:
+        session.close()
+
     accession = f"UPLOAD-{uuid.uuid4().hex[:16]}"
     session = get_session()
     try:
@@ -159,7 +184,7 @@ def ingest_upload(
             source="upload",
             title=filename,
             processing_status="processing",
-            content_hash=hashlib.sha256(payload).hexdigest(),
+            content_hash=content_hash,
         )
         session.add(filing)
         session.commit()
@@ -180,7 +205,7 @@ def ingest_upload(
 
 def _index_text(filing_id: int, text: str, title: str | None = None) -> dict:
     if not text.strip():
-        raise RuntimeError("No extractable text in filing document")
+        raise FilingExtractionError("No extractable text in filing document")
 
     chunks = chunk_filing_text(text)
     embedder = get_embedder()

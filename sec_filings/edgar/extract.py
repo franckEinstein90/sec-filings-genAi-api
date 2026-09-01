@@ -13,6 +13,10 @@ _SPACES = re.compile(r"[ \t]+")
 _BLANK = re.compile(r"\n{3,}")
 
 
+class FilingExtractionError(ValueError):
+    """Raised when a filing payload cannot be converted into useful text."""
+
+
 def extract_text(payload: bytes, filename: str | None = None, content_type: str | None = None) -> str:
     name = (filename or "").lower()
     ctype = (content_type or "").lower()
@@ -24,11 +28,14 @@ def extract_text(payload: bytes, filename: str | None = None, content_type: str 
 
 
 def extract_pdf(payload: bytes) -> str:
-    reader = PdfReader(io.BytesIO(payload))
-    pages = []
-    for index, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        pages.append(f"[Page {index}]\n{text}")
+    try:
+        reader = PdfReader(io.BytesIO(payload))
+        pages = []
+        for index, page in enumerate(reader.pages, start=1):
+            text = page.extract_text() or ""
+            pages.append(f"[Page {index}]\n{text}")
+    except Exception as exc:
+        raise FilingExtractionError("Unable to parse PDF filing") from exc
     return _normalize("\n\n".join(pages))
 
 

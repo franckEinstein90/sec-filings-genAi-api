@@ -1,9 +1,9 @@
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 
 from sec_filings.config import DEFAULT_FORM_TYPES, INGEST_DEFAULT_LIMIT
 from sec_filings.db.models import Company, Filing
 from sec_filings.db.session import get_session
-from sec_filings.edgar.client import EdgarError
+from sec_filings.edgar.client import EdgarError, EdgarTransientError
 from sec_filings.schemas import IngestRequest
 from sec_filings.services.ingest import ingest_ticker, ingest_upload
 
@@ -69,6 +69,8 @@ def ingest_from_edgar(body: IngestRequest):
     limit = body.limit if body.limit is not None else INGEST_DEFAULT_LIMIT
     try:
         result = ingest_ticker(ticker, form_types=form_types, limit=limit)
+    except EdgarTransientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except EdgarError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -78,6 +80,7 @@ def ingest_from_edgar(body: IngestRequest):
 
 @router.post("/upload", status_code=201)
 async def upload_filing(
+    response: Response,
     file: UploadFile = File(...),
     ticker: str = Form(...),
     form_type: str = Form("UPLOAD"),
@@ -98,8 +101,14 @@ async def upload_filing(
             form_type=form_type.strip() or "UPLOAD",
             content_type=file.content_type,
         )
+    except EdgarTransientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except EdgarError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if result.get("skipped"):
+        response.status_code = 200
     return result
