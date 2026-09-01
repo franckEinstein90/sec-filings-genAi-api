@@ -1,6 +1,8 @@
 # SEC Filings GenAI API
 
-Flask API that pulls SEC filings from EDGAR, chunks them, stores embeddings in **Postgres + pgvector**, and answers questions with retrieval-augmented generation.
+FastAPI service that pulls SEC filings from EDGAR, chunks them, stores embeddings in **Postgres + pgvector**, and answers questions with retrieval-augmented generation.
+
+The same tools are also exposed as an **MCP server built with Google ADK** (`FunctionTool` + `adk_to_mcp_tool_type`), so Cursor, Claude, or any MCP client can ingest and query filings.
 
 There is no separate database install required for local development: `pgserver` ships a Postgres 16 binary (with the `vector` extension) and this app starts it from Python. Point `DATABASE_URL` at any Postgres that has pgvector when you want a durable server instead.
 
@@ -14,6 +16,7 @@ The companion UI is [sec-filings-genAi-app](https://github.com/franckEinstein90/
 - Embed with OpenAI (`text-embedding-3-small` by default) and store in `filing_chunks.embedding`
 - Query with cosine similarity over pgvector and cite ticker, form, date, and section
 - Track a watchlist/portfolio of holdings
+- Serve the same operations over MCP for agents
 
 ## Quick start (embedded Postgres)
 
@@ -22,13 +25,45 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# set OPENAI_API_KEY and a SEC_USER_AGENT that includes your email
+# set OPENAI_API_KEY, GOOGLE_API_KEY (for the ADK agent), and a SEC_USER_AGENT that includes your email
 
 python -m sec_filings.db.bootstrap   # starts embedded Postgres, enables pgvector, runs Alembic
-python main.py                       # http://localhost:5000/health
+python main.py                       # http://localhost:5000/health  and  /docs
 ```
 
-Data directory defaults to `.pgdata/` (gitignored). Override with `PGDATA_DIR`.
+OpenAPI lives at `/docs`. Data directory defaults to `.pgdata/` (gitignored). Override with `PGDATA_DIR`.
+
+## MCP server (Google ADK)
+
+The stdio MCP server wraps ADK `FunctionTool`s and converts them with `adk_to_mcp_tool_type`:
+
+```bash
+python -m sec_filings.mcp.server
+```
+
+Cursor / Claude Desktop config:
+
+```json
+{
+  "mcpServers": {
+    "sec-filings": {
+      "command": "python",
+      "args": ["-m", "sec_filings.mcp.server"],
+      "cwd": "/absolute/path/to/sec-filings-genAi-api"
+    }
+  }
+}
+```
+
+Tools: `resolve_company`, `ingest_sec_filings`, `list_indexed_filings`, `query_sec_filings`, `add_watchlist_holding`, `list_watchlist`.
+
+### ADK agent UI
+
+```bash
+adk web agents
+```
+
+Then pick `sec_filings_agent`. The agent uses the same FunctionTools the MCP server exposes. Set `GOOGLE_API_KEY` for Gemini.
 
 ## Optional: Docker Postgres
 
@@ -47,12 +82,6 @@ python -m sec_filings.db.bootstrap
 alembic revision -m "add_something" --autogenerate
 alembic upgrade head
 ```
-
-The initial migration:
-
-1. `CREATE EXTENSION vector`
-2. `companies`, `filings`, `filing_chunks`, `portfolios`, `holdings`
-3. HNSW index on `filing_chunks.embedding` (`vector_cosine_ops`)
 
 ## HTTP API
 
@@ -79,17 +108,18 @@ EDGAR requires a descriptive `User-Agent` with contact info. Set `SEC_USER_AGENT
 EMBEDDING_PROVIDER=hash LLM_PROVIDER=mock pytest -q
 ```
 
-Tests boot embedded Postgres, apply migrations, ingest a mocked 10-K, and assert pgvector nearest-neighbor search.
-
 ## Layout
 
 ```
 sec_filings/
+  app.py        FastAPI factory
+  routes/       HTTP routers
   db/           models, embedded Postgres, Alembic bootstrap
   edgar/        EDGAR client and HTML/PDF text extraction
   embeddings/   OpenAI + deterministic hash embedder (tests)
   rag/          chunking, similarity query, LLM answer
-  routes/       Flask blueprints
   services/     ingest pipeline
+  mcp/          Google ADK FunctionTools + MCP stdio server
+agents/sec_filings_agent/   ADK-discoverable agent
 alembic/versions/
 ```

@@ -1,19 +1,24 @@
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from sec_filings.config import DEFAULT_FORM_TYPES, INGEST_DEFAULT_LIMIT
 from sec_filings.db.models import Company, Filing
 from sec_filings.db.session import get_session
 from sec_filings.edgar.client import EdgarError
+from sec_filings.schemas import IngestRequest
 from sec_filings.services.ingest import ingest_ticker, ingest_upload
 
-filings_bp = Blueprint("filings", __name__, url_prefix="/api/v1/filings")
+router = APIRouter(prefix="/api/v1/filings", tags=["filings"])
 
 
-@filings_bp.get("")
-def list_filings():
-    ticker = (request.args.get("ticker") or "").strip().upper() or None
-    cik = (request.args.get("cik") or "").strip() or None
-    form_type = (request.args.get("form_type") or "").strip().upper() or None
+@router.get("")
+def list_filings(
+    ticker: str | None = Query(default=None),
+    cik: str | None = Query(default=None),
+    form_type: str | None = Query(default=None),
+):
+    ticker = (ticker or "").strip().upper() or None
+    cik = (cik or "").strip() or None
+    form_type = (form_type or "").strip().upper() or None
     session = get_session()
     try:
         stmt = session.query(Filing).join(Company)
@@ -24,80 +29,77 @@ def list_filings():
         if form_type:
             stmt = stmt.filter(Filing.form_type == form_type)
         filings = stmt.order_by(Filing.filing_date.desc(), Filing.id.desc()).all()
-        return jsonify({"filings": [filing.to_dict(include_company=True) for filing in filings]})
+        return {"filings": [filing.to_dict(include_company=True) for filing in filings]}
     finally:
         session.close()
 
 
-@filings_bp.get("/<int:filing_id>")
+@router.get("/{filing_id}")
 def get_filing(filing_id: int):
     session = get_session()
     try:
         filing = session.get(Filing, filing_id)
         if filing is None:
-            return jsonify({"error": "Filing not found"}), 404
-        return jsonify({"filing": filing.to_dict(include_company=True)})
+            raise HTTPException(status_code=404, detail="Filing not found")
+        return {"filing": filing.to_dict(include_company=True)}
     finally:
         session.close()
 
 
-@filings_bp.delete("/<int:filing_id>")
+@router.delete("/{filing_id}")
 def delete_filing(filing_id: int):
     session = get_session()
     try:
         filing = session.get(Filing, filing_id)
         if filing is None:
-            return jsonify({"error": "Filing not found"}), 404
+            raise HTTPException(status_code=404, detail="Filing not found")
         session.delete(filing)
         session.commit()
-        return jsonify({"message": "Filing deleted"})
+        return {"message": "Filing deleted"}
     finally:
         session.close()
 
 
-@filings_bp.post("/ingest")
-def ingest_from_edgar():
-    data = request.get_json(silent=True) or {}
-    ticker = (data.get("ticker") or "").strip()
+@router.post("/ingest", status_code=201)
+def ingest_from_edgar(body: IngestRequest):
+    ticker = body.ticker.strip()
     if not ticker:
-        return jsonify({"error": "ticker is required"}), 400
-    form_types = data.get("form_types") or list(DEFAULT_FORM_TYPES)
-    limit = data.get("limit", INGEST_DEFAULT_LIMIT)
-    try:
-        limit = int(limit)
-    except (TypeError, ValueError):
-        return jsonify({"error": "limit must be an integer"}), 400
+        raise HTTPException(status_code=400, detail="ticker is required")
+    form_types = body.form_types or list(DEFAULT_FORM_TYPES)
+    limit = body.limit if body.limit is not None else INGEST_DEFAULT_LIMIT
     try:
         result = ingest_ticker(ticker, form_types=form_types, limit=limit)
     except EdgarError as exc:
-        return jsonify({"error": str(exc)}), 404
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 502
-    return jsonify(result), 201
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return result
 
 
-@filings_bp.post("/upload")
-def upload_filing():
-    file = request.files.get("file")
-    ticker = (request.form.get("ticker") or "").strip()
-    form_type = (request.form.get("form_type") or "UPLOAD").strip()
-    if not file or not file.filename:
-        return jsonify({"error": "file is required"}), 400
+@router.post("/upload", status_code=201)
+async def upload_filing(
+    file: UploadFile = File(...),
+    ticker: str = Form(...),
+    form_type: str = Form("UPLOAD"),
+):
+    ticker = ticker.strip()
     if not ticker:
-        return jsonify({"error": "ticker is required"}), 400
-    payload = file.read()
+        raise HTTPException(status_code=400, detail="ticker is required")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="file is required")
+    payload = await file.read()
     if not payload:
-        return jsonify({"error": "empty file"}), 400
+        raise HTTPException(status_code=400, detail="empty file")
     try:
         result = ingest_upload(
             ticker=ticker,
             filename=file.filename,
             payload=payload,
-            form_type=form_type,
-            content_type=file.mimetype,
+            form_type=form_type.strip() or "UPLOAD",
+            content_type=file.content_type,
         )
     except EdgarError as exc:
-        return jsonify({"error": str(exc)}), 404
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-    return jsonify(result), 201
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return result

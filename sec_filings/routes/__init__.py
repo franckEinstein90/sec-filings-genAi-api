@@ -1,13 +1,13 @@
-from sec_filings.routes.companies import companies_bp
-from sec_filings.routes.filings import filings_bp
-from sec_filings.routes.health import health_bp
-from sec_filings.routes.portfolio import portfolio_bp
-from sec_filings.routes.query import query_bp
+from sec_filings.routes.companies import router as companies_router
+from sec_filings.routes.filings import router as filings_router
+from sec_filings.routes.health import router as health_router
+from sec_filings.routes.portfolio import router as portfolio_router
+from sec_filings.routes.query import router as query_router
 
 __all__ = [
-    "companies_bp",
-    "filings_bp",
-    "health_bp",
-    "portfolio_bp",
-    "query_bp",
+    "companies_router",
+    "filings_router",
+    "health_router",
+    "portfolio_router",
+    "query_router",
 ]

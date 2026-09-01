@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("EMBEDDING_PROVIDER", "hash")
 os.environ.setdefault("LLM_PROVIDER", "mock")
@@ -23,9 +24,10 @@ def app(pgdata):
     return create_app(testing=True, pgdata=pgdata)
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def client(app):
-    return app.test_client()
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 @pytest.fixture()

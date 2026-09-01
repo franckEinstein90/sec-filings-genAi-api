@@ -17,7 +17,7 @@ def get_session():
 
 
 class _SessionProxy:
-    """Backwards-compatible remove() used by Flask teardown."""
+    """Optional hook if a framework wants to reset a thread-local session."""
 
     def remove(self) -> None:
         return None
