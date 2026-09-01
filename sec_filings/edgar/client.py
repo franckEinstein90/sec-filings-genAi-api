@@ -28,6 +28,10 @@ class EdgarError(RuntimeError):
     pass
 
 
+class EdgarTransientError(EdgarError):
+    """Raised when EDGAR remains rate limited or temporarily unavailable."""
+
+
 @dataclass(frozen=True)
 class CompanyRef:
     cik: str
@@ -62,6 +66,8 @@ class EdgarClient:
         user_agent: str = SEC_USER_AGENT,
         timeout: float = 30.0,
         min_interval: float = 0.15,
+        max_retries: int = 2,
+        retry_backoff: float = 0.5,
         client: httpx.Client | None = None,
     ):
         self.user_agent = user_agent
@@ -75,6 +81,8 @@ class EdgarClient:
             follow_redirects=True,
         )
         self.min_interval = min_interval
+        self.max_retries = max(0, max_retries)
+        self.retry_backoff = max(0.0, retry_backoff)
         self._last_request = 0.0
 
     def close(self) -> None:
@@ -177,17 +185,48 @@ class EdgarClient:
         return mapping
 
     def _get(self, url: str) -> httpx.Response:
-        self._throttle()
-        logger.debug("EDGAR GET %s", url)
-        response = self._client.get(url)
-        if response.status_code == 403:
-            raise EdgarError(
-                "EDGAR returned 403. Set SEC_USER_AGENT to a descriptive string "
-                "that includes a contact email, as required by the SEC."
-            )
-        if response.status_code >= 400:
-            raise EdgarError(f"EDGAR request failed ({response.status_code}): {url}")
-        return response
+        for attempt in range(self.max_retries + 1):
+            self._throttle()
+            logger.debug("EDGAR GET %s", url)
+            response = self._client.get(url)
+
+            if response.status_code in {429, 503}:
+                if attempt >= self.max_retries:
+                    raise EdgarTransientError(
+                        f"EDGAR remained unavailable after {attempt + 1} attempts "
+                        f"(HTTP {response.status_code}): {url}"
+                    )
+                delay = self._retry_delay(response, attempt)
+                logger.warning(
+                    "EDGAR returned %s; retrying in %.2fs (%s/%s)",
+                    response.status_code,
+                    delay,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                if delay:
+                    time.sleep(delay)
+                continue
+
+            if response.status_code == 403:
+                raise EdgarError(
+                    "EDGAR returned 403. Set SEC_USER_AGENT to a descriptive string "
+                    "that includes a contact email, as required by the SEC."
+                )
+            if response.status_code >= 400:
+                raise EdgarError(f"EDGAR request failed ({response.status_code}): {url}")
+            return response
+
+        raise EdgarTransientError(f"EDGAR request failed after retries: {url}")
+
+    def _retry_delay(self, response: httpx.Response, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            try:
+                return max(0.0, min(float(retry_after), 30.0))
+            except ValueError:
+                pass
+        return min(self.retry_backoff * (2**attempt), 30.0)
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request
