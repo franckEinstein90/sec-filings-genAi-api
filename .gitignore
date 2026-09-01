@@ -134,6 +134,13 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Embedded Postgres data and local artifacts
+.pgdata/
+pgdata/
+vectorstore/
+*.db
+document_library_metadata.db
+
 # Environments
 .env
 .envrc

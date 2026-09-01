@@ -1,0 +1,10 @@
+Add a new migration after the database is running:
+
+```bash
+python -m sec_filings.db.bootstrap
+alembic revision -m "describe_your_change" --autogenerate
+# inspect alembic/versions/* then:
+alembic upgrade head
+```
+
+The first revision (`001_initial_sec_pgvector`) enables `vector`, creates companies/filings/chunks/portfolios, and adds an HNSW index on `filing_chunks.embedding`.
