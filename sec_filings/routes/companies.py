@@ -1,16 +1,17 @@
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, HTTPException, Query
 
 from sec_filings.db.models import Company, Filing
 from sec_filings.db.session import get_session
 from sec_filings.edgar.client import EdgarError
+from sec_filings.schemas import CompanyCreate
 from sec_filings.services.ingest import upsert_company_from_ticker
 
-companies_bp = Blueprint("companies", __name__, url_prefix="/api/v1/companies")
+router = APIRouter(prefix="/api/v1/companies", tags=["companies"])
 
 
-@companies_bp.get("")
-def list_companies():
-    query = (request.args.get("q") or "").strip()
+@router.get("")
+def list_companies(q: str = Query(default="")):
+    query = q.strip()
     session = get_session()
     try:
         stmt = session.query(Company).order_by(Company.ticker)
@@ -22,12 +23,12 @@ def list_companies():
                 | (Company.cik.ilike(like))
             )
         companies = stmt.all()
-        return jsonify({"companies": [company.to_dict() for company in companies]})
+        return {"companies": [company.to_dict() for company in companies]}
     finally:
         session.close()
 
 
-@companies_bp.get("/<cik>")
+@router.get("/{cik}")
 def get_company(cik: str):
     session = get_session()
     try:
@@ -35,7 +36,7 @@ def get_company(cik: str):
         if company is None:
             company = session.query(Company).filter_by(ticker=cik.upper()).one_or_none()
         if company is None:
-            return jsonify({"error": "Company not found"}), 404
+            raise HTTPException(status_code=404, detail="Company not found")
         filings = (
             session.query(Filing)
             .filter_by(company_id=company.id)
@@ -44,21 +45,20 @@ def get_company(cik: str):
         )
         payload = company.to_dict()
         payload["filings"] = [filing.to_dict() for filing in filings]
-        return jsonify({"company": payload})
+        return {"company": payload}
     finally:
         session.close()
 
 
-@companies_bp.post("")
-def create_company():
-    data = request.get_json(silent=True) or {}
-    ticker = (data.get("ticker") or "").strip()
+@router.post("", status_code=201)
+def create_company(body: CompanyCreate):
+    ticker = body.ticker.strip()
     if not ticker:
-        return jsonify({"error": "ticker is required"}), 400
+        raise HTTPException(status_code=400, detail="ticker is required")
     try:
         company = upsert_company_from_ticker(ticker)
     except EdgarError as exc:
-        return jsonify({"error": str(exc)}), 404
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 502
-    return jsonify({"company": company.to_dict()}), 201
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"company": company.to_dict()}

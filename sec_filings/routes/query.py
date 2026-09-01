@@ -1,29 +1,28 @@
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, HTTPException
 
 from sec_filings.rag.query import query_filings
+from sec_filings.schemas import QueryRequest
 
-query_bp = Blueprint("query", __name__, url_prefix="/api/v1")
+router = APIRouter(prefix="/api/v1", tags=["query"])
 
 
-@query_bp.post("/query")
-def query():
-    data = request.get_json(silent=True) or {}
-    prompt = (data.get("prompt") or data.get("question") or "").strip()
+@router.post("/query")
+def query(body: QueryRequest):
+    prompt = (body.prompt or body.question or "").strip()
     if not prompt:
-        return jsonify({"error": "prompt is required"}), 400
+        raise HTTPException(status_code=400, detail="prompt is required")
     try:
-        result = query_filings(
+        return query_filings(
             prompt,
-            ticker=data.get("ticker"),
-            cik=data.get("cik"),
-            filing_id=data.get("filing_id"),
-            form_type=data.get("form_type"),
-            top_k=data.get("top_k"),
+            ticker=body.ticker,
+            cik=body.cik,
+            filing_id=body.filing_id,
+            form_type=body.form_type,
+            top_k=body.top_k,
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 503
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
-    return jsonify(result)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

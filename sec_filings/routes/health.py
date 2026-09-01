@@ -1,17 +1,17 @@
-from flask import Blueprint, jsonify
 from sqlalchemy import text
+from fastapi import APIRouter
 
 from sec_filings.db.bootstrap import get_engine
 
-health_bp = Blueprint("health", __name__)
+router = APIRouter(tags=["health"])
 
 
-@health_bp.get("/health")
+@router.get("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return {"status": "ok"}
 
 
-@health_bp.get("/api/v1/ready")
+@router.get("/api/v1/ready")
 def ready():
     engine = get_engine()
     with engine.connect() as conn:
@@ -19,10 +19,4 @@ def ready():
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
         ).scalar()
         db = conn.execute(text("SELECT current_database()")).scalar()
-    return jsonify(
-        {
-            "status": "ready",
-            "database": db,
-            "pgvector": vector,
-        }
-    )
+    return {"status": "ready", "database": db, "pgvector": vector}

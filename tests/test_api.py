@@ -6,15 +6,23 @@ from sec_filings.services.ingest import ingest_ticker, ingest_upload
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.get_json()["status"] == "ok"
+    assert response.json()["status"] == "ok"
 
 
 def test_ready_reports_pgvector(client):
     response = client.get("/api/v1/ready")
     assert response.status_code == 200
-    body = response.get_json()
+    body = response.json()
     assert body["status"] == "ready"
     assert body["pgvector"]
+
+
+def test_openapi_docs(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    spec = response.json()
+    assert spec["info"]["title"] == "SEC Filings GenAI API"
+    assert "/api/v1/filings/ingest" in spec["paths"]
 
 
 def test_ingest_and_query_roundtrip(client, fake_edgar):
@@ -22,8 +30,8 @@ def test_ingest_and_query_roundtrip(client, fake_edgar):
         "/api/v1/filings/ingest",
         json={"ticker": "AAPL", "form_types": ["10-K"], "limit": 1},
     )
-    assert ingest.status_code == 201, ingest.get_data(as_text=True)
-    payload = ingest.get_json()
+    assert ingest.status_code == 201, ingest.text
+    payload = ingest.json()
     assert payload["company"]["ticker"] == "AAPL"
     stored = payload["ingested"] or payload["skipped"]
     assert stored
@@ -31,14 +39,14 @@ def test_ingest_and_query_roundtrip(client, fake_edgar):
 
     listed = client.get("/api/v1/filings?ticker=AAPL")
     assert listed.status_code == 200
-    assert listed.get_json()["filings"]
+    assert listed.json()["filings"]
 
     queried = client.post(
         "/api/v1/query",
         json={"prompt": "What risk factors are disclosed?", "ticker": "AAPL"},
     )
-    assert queried.status_code == 200, queried.get_data(as_text=True)
-    body = queried.get_json()
+    assert queried.status_code == 200, queried.text
+    body = queried.json()
     assert body["answer"]
     assert body["citations"]
     assert body["citations"][0]["filing_id"] == filing_id
@@ -48,32 +56,32 @@ def test_ingest_and_query_roundtrip(client, fake_edgar):
 def test_upload_html_filing(client, fake_edgar):
     response = client.post(
         "/api/v1/filings/upload",
-        data={
-            "ticker": "MSFT",
-            "form_type": "10-Q",
+        data={"ticker": "MSFT", "form_type": "10-Q"},
+        files={
             "file": (
-                BytesIO(b"<html><body>Item 2. MD&A Azure growth continued.</body></html>"),
                 "msft.htm",
-            ),
+                BytesIO(b"<html><body>Item 2. MD&A Azure growth continued.</body></html>"),
+                "text/html",
+            )
         },
     )
-    assert response.status_code == 201, response.get_data(as_text=True)
-    assert response.get_json()["filing"]["processing_status"] == "ready"
+    assert response.status_code == 201, response.text
+    assert response.json()["filing"]["processing_status"] == "ready"
 
 
 def test_portfolio_holdings(client, fake_edgar):
     created = client.post("/api/v1/portfolios", json={"name": "Tech", "description": "demo"})
     assert created.status_code == 201
-    portfolio_id = created.get_json()["portfolio"]["id"]
+    portfolio_id = created.json()["portfolio"]["id"]
 
     added = client.post(
         f"/api/v1/portfolios/{portfolio_id}/holdings",
         json={"ticker": "AAPL", "shares": 10},
     )
-    assert added.status_code == 201, added.get_data(as_text=True)
+    assert added.status_code == 201, added.text
     watchlist = client.get("/api/v1/portfolio")
     assert watchlist.status_code == 200
-    assert watchlist.get_json()["portfolio"]["name"] == "Watchlist"
+    assert watchlist.json()["portfolio"]["name"] == "Watchlist"
 
 
 def test_query_requires_prompt(client):
