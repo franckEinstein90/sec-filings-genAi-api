@@ -20,21 +20,21 @@ class RecordingLLM:
         }
 
 
-def _seed_citation_filing(db_session):
+def _seed_citation_filing(db_session, *, cik, ticker, accession):
     embedder = HashEmbedder()
-    company = Company(cik="0000001401", ticker="CITEVAL", name="Citation Evaluation Corp")
+    company = Company(cik=cik, ticker=ticker, name=f"{ticker} Citation Corp")
     db_session.add(company)
     db_session.flush()
     filing = Filing(
         company_id=company.id,
-        accession_number="CITATION-EVAL-2026",
+        accession_number=accession,
         form_type="10-K",
         filing_date=date(2026, 8, 4),
         processing_status="ready",
         chunk_count=2,
         embedding_model=embedder.model_name,
         source="edgar",
-        edgar_url="https://sec.example/citation-eval",
+        edgar_url=f"https://sec.example/{accession}",
     )
     db_session.add(filing)
     db_session.flush()
@@ -64,7 +64,12 @@ def _seed_citation_filing(db_session):
 
 
 def test_rag_citations_are_grounded_ranked_and_traceable(db_session, monkeypatch):
-    filing, stored_chunks = _seed_citation_filing(db_session)
+    filing, stored_chunks = _seed_citation_filing(
+        db_session,
+        cik="0000001401",
+        ticker="CITEVAL",
+        accession="CITATION-EVAL-2026",
+    )
     recorder = RecordingLLM()
     monkeypatch.setattr("sec_filings.rag.query.get_llm", lambda: recorder)
 
@@ -109,7 +114,12 @@ def test_rag_citations_are_grounded_ranked_and_traceable(db_session, monkeypatch
 
 
 def test_no_matching_metadata_returns_no_citations_and_skips_llm(db_session, monkeypatch):
-    _seed_citation_filing(db_session)
+    _seed_citation_filing(
+        db_session,
+        cik="0000001402",
+        ticker="CITENO",
+        accession="CITATION-NO-HIT-2026",
+    )
 
     def _should_not_be_called():
         raise AssertionError("LLM should not be created when retrieval has no hits")

@@ -67,4 +67,4 @@ def test_ingest_endpoint_maps_exhausted_edgar_to_503(client, monkeypatch):
     )
 
     assert response.status_code == 503
-    assert "remained unavailable" in response.json()["detail"]
+    assert "remained unavailable" in response.json()["error"]

@@ -74,7 +74,7 @@ def test_similarity_search_respects_ticker_form_and_filing_metadata_filters(db_s
     form_hits = _similarity_search(
         db_session,
         query_vector,
-        ticker=None,
+        ticker="FLTTWO",
         cik=None,
         filing_id=None,
         form_type="10-Q",
@@ -83,6 +83,17 @@ def test_similarity_search_respects_ticker_form_and_filing_metadata_filters(db_s
     assert form_hits
     assert {hit["ticker"] for hit in form_hits} == {"FLTTWO"}
     assert {hit["filing_id"] for hit in form_hits} == {second.id}
+
+    wrong_form_hits = _similarity_search(
+        db_session,
+        query_vector,
+        ticker="FLTTWO",
+        cik=None,
+        filing_id=None,
+        form_type="10-K",
+        top_k=10,
+    )
+    assert wrong_form_hits == []
 
     filing_hits = _similarity_search(
         db_session,

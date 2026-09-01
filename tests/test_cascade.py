@@ -1,9 +1,15 @@
 from datetime import date
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 
 from sec_filings.db.models import Company, Filing, FilingChunk
 from sec_filings.embeddings.hash_embedder import HashEmbedder
+
+
+def _count(db_session, model, criterion):
+    return db_session.execute(
+        select(func.count()).select_from(model).where(criterion)
+    ).scalar_one()
 
 
 def test_database_cascade_deletes_chunks_when_filing_is_deleted(db_session):
@@ -37,8 +43,8 @@ def test_database_cascade_deletes_chunks_when_filing_is_deleted(db_session):
     db_session.execute(delete(Filing).where(Filing.id == filing_id))
     db_session.commit()
 
-    assert db_session.get(Filing, filing_id) is None
-    assert db_session.get(FilingChunk, chunk_id) is None
+    assert _count(db_session, Filing, Filing.id == filing_id) == 0
+    assert _count(db_session, FilingChunk, FilingChunk.id == chunk_id) == 0
 
 
 def test_database_cascade_deletes_filings_and_chunks_when_company_is_deleted(db_session):
@@ -70,6 +76,6 @@ def test_database_cascade_deletes_filings_and_chunks_when_company_is_deleted(db_
     db_session.execute(delete(Company).where(Company.id == company_id))
     db_session.commit()
 
-    assert db_session.get(Company, company_id) is None
-    assert db_session.get(Filing, filing_id) is None
-    assert db_session.get(FilingChunk, chunk_id) is None
+    assert _count(db_session, Company, Company.id == company_id) == 0
+    assert _count(db_session, Filing, Filing.id == filing_id) == 0
+    assert _count(db_session, FilingChunk, FilingChunk.id == chunk_id) == 0

@@ -82,4 +82,4 @@ def test_query_endpoint_maps_llm_provider_failure_to_503(client, db_session, mon
     )
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "simulated upstream LLM outage"
+    assert response.json()["error"] == "simulated upstream LLM outage"
